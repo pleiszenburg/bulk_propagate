@@ -23,8 +23,14 @@ def _kepler_equation_prime_hyper(F, M, ecc):
 
 
 def newton_factory(func, fprime):
+    """
+    TODO pylint
+    """
     @jit
     def jit_newton_wrapper(x0, args=(), tol=1.48e-08, maxiter=50):
+        """
+        TODO pylint
+        """
         p0 = float(x0)
         for _ in range(maxiter):
             fval = func(p0, *args)
