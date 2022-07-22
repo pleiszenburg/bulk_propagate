@@ -3,12 +3,12 @@ import sys
 import numpy as np
 from astropy import units as u
 
-from poliastro.core.propagation.farnocchia import (
+from poliastro.twobody.propagation.enums import PropagatorKind
+
+from ...core.propagation.farnocchia import (
     farnocchia_coe as farnocchia_coe_fast,
     farnocchia_rv as farnocchia_rv_fast,
 )
-from poliastro.twobody.propagation.enums import PropagatorKind
-
 from ..states import ClassicalState
 
 from ._compat import OldPropagatorModule
