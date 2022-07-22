@@ -1,7 +1,7 @@
 import numpy as np
 from numba import njit as jit
 
-from poliastro.core.angles import (
+from ..angles import (
     D_to_M,
     D_to_nu,
     E_to_M,
