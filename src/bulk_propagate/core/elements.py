@@ -8,9 +8,9 @@ import numpy as np
 from numba import njit as jit, prange
 from numpy import cos, cross, sin, sqrt
 
-from poliastro._math.linalg import norm
 from poliastro.core.util import rotation_matrix
 
+from .._math.linalg import norm
 from .angles import E_to_nu, F_to_nu
 
 
