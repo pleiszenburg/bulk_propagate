@@ -1,15 +1,23 @@
 from functools import cached_property
+from warnings import warn
 
 import numpy as np
 from astropy import time, units as u
+from astropy.coordinates import (
+    # ICRS,
+    CartesianDifferential,
+    CartesianRepresentation,
+    # get_body_barycentric,
+)
 
 from poliastro.frames.util import get_frame
 from poliastro.twobody.elements import eccentricity_vector, energy
-from poliastro.twobody.orbit.creation import OrbitCreationMixin
-from poliastro.twobody.propagation import FarnocchiaPropagator, PropagatorKind
+from poliastro.twobody.sampling import TrueAnomalyBounds
 from poliastro.util import norm
 
+from ..propagation import FarnocchiaPropagator, PropagatorKind
 from ..states import BaseState
+from .creation import OrbitCreationMixin
 
 ORBIT_FORMAT = "{r_p:.0f} x {r_a:.0f} x {inc:.1f} ({frame}) orbit around {body} at epoch {epoch} ({scale})"
 # String representation for orbits around bodies without predefined
@@ -28,7 +36,7 @@ class Orbit(OrbitCreationMixin):
 
     """
 
-    def __init__(self, state, epoch):
+    def __init__(self, state, epoch):  # pylint: disable=super-init-not-called
         """Constructor.
 
         Parameters
@@ -192,6 +200,90 @@ class Orbit(OrbitCreationMixin):
         """
         return get_frame(self.attractor, self.plane, self.epoch)
 
+    def change_plane(self, plane):
+        """Changes fundamental plane.
+
+        Parameters
+        ----------
+        plane : ~poliastro.frames.Planes
+            Fundamental plane of the frame.
+
+        """
+        if plane is self.plane:
+            return self
+
+        coords_orig = self.get_frame().realize_frame(
+            self.represent_as(CartesianRepresentation, CartesianDifferential)
+        )
+
+        dest_frame = get_frame(self.attractor, plane, obstime=self.epoch)
+
+        coords_dest = coords_orig.transform_to(dest_frame)
+        coords_dest.representation_type = CartesianRepresentation
+
+        return Orbit.from_coords(self.attractor, coords_dest, plane=plane)
+
+    def represent_as(self, representation, differential_class=None):
+        """Converts the orbit to a specific representation.
+
+        .. versionadded:: 0.11.0
+
+        Parameters
+        ----------
+        representation : ~astropy.coordinates.BaseRepresentation
+            Representation object to use. It must be a class, not an instance.
+        differential_class : ~astropy.coordinates.BaseDifferential, optional
+            Class in which the differential should be represented, default to None.
+
+        Examples
+        --------
+        >>> from poliastro.examples import iss
+        >>> from astropy.coordinates import SphericalRepresentation
+        >>> iss.represent_as(CartesianRepresentation)
+        <CartesianRepresentation (x, y, z) in km
+            (859.07256, -4137.20368, 5295.56871)>
+        >>> iss.represent_as(CartesianRepresentation).xyz
+        <Quantity [  859.07256, -4137.20368,  5295.56871] km>
+        >>> iss.represent_as(CartesianRepresentation, CartesianDifferential).differentials['s']
+        <CartesianDifferential (d_x, d_y, d_z) in km / s
+            (7.37289205, 2.08223573, 0.43999979)>
+        >>> iss.represent_as(CartesianRepresentation, CartesianDifferential).differentials['s'].d_xyz
+        <Quantity [7.37289205, 2.08223573, 0.43999979] km / s>
+        >>> iss.represent_as(SphericalRepresentation, CartesianDifferential)
+        <SphericalRepresentation (lon, lat, distance) in (rad, rad, km)
+            (4.91712525, 0.89732339, 6774.76995296)
+         (has differentials w.r.t.: 's')>
+
+        """
+        # As we do not know the differentials, we first convert to cartesian,
+        # then let the frame represent_as do the rest
+        # TODO: Perhaps this should be public API as well?
+        cartesian = CartesianRepresentation(
+            *self.r, differentials=CartesianDifferential(*self.v)
+        )
+
+        return cartesian.represent_as(representation, differential_class)
+
+    def pqw(self):
+        """Perifocal frame (PQW) vectors."""
+        warn(
+            "Orbit.pqw is deprecated and will be removed in a future release",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+        if self.ecc < 1e-8:
+            if abs(self.inc.to_value(u.rad)) > 1e-8:
+                node = np.cross([0, 0, 1], self.h_vec) / norm(self.h_vec)
+                p_vec = node / norm(node)  # Circular inclined
+            else:
+                p_vec = [1, 0, 0] * u.one  # Circular equatorial
+        else:
+            p_vec = self.e_vec / self.ecc
+        w_vec = self.h_vec / norm(self.h_vec)
+        q_vec = np.cross(w_vec, p_vec) * u.one
+        return p_vec, q_vec, w_vec
+
     def __str__(self):
         if self.a > 1e7 * u.km:
             unit = u.au
@@ -275,6 +367,73 @@ class Orbit(OrbitCreationMixin):
         new_epoch = self.epoch + time_of_flight
 
         return self.__class__(new_state, new_epoch)
+
+    def to_ephem(self, strategy=TrueAnomalyBounds()):
+        """Samples Orbit to return an ephemerides.
+
+        .. versionadded:: 0.17.0
+
+        """
+        from poliastro.ephem import Ephem
+
+        coordinates, epochs = strategy.sample(self)
+        return Ephem(coordinates, epochs, self.plane)
+
+    def sample(self, values=100, *, min_anomaly=None, max_anomaly=None):
+        r"""Samples an orbit to some specified time values.
+
+        .. versionadded:: 0.8.0
+
+        Parameters
+        ----------
+        values : int
+            Number of interval points (default to 100).
+        min_anomaly, max_anomaly : ~astropy.units.Quantity, optional
+            Anomaly limits to sample the orbit.
+            For elliptic orbits the default will be :math:`E \in \left[0, 2 \pi \right]`,
+            and for hyperbolic orbits it will be :math:`\nu \in \left[-\nu_c, \nu_c \right]`,
+            where :math:`\nu_c` is either the current true anomaly
+            or a value that corresponds to :math:`r = 3p`.
+
+        Returns
+        -------
+        positions: ~astropy.coordinates.CartesianRepresentation
+            Array of x, y, z positions.
+
+        Notes
+        -----
+        When specifying a number of points, the initial and final
+        position is present twice inside the result (first and
+        last row). This is more useful for plotting.
+
+        Examples
+        --------
+        >>> from astropy import units as u
+        >>> from poliastro.examples import iss
+        >>> iss.sample()  # doctest: +ELLIPSIS
+        <CartesianRepresentation (x, y, z) in km ...
+        >>> iss.sample(10)  # doctest: +ELLIPSIS
+        <CartesianRepresentation (x, y, z) in km ...
+
+        """
+        if min_anomaly is not None or max_anomaly is not None:
+            warn(
+                "Specifying min_anomaly and max_anomaly in method `sample` is deprecated "
+                "and will be removed in a future release, "
+                "use `Orbit.to_ephem(strategy=TrueAnomalyBounds(min_nu=..., max_nu=...))` instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+        ephem = self.to_ephem(
+            strategy=TrueAnomalyBounds(
+                min_nu=min_anomaly,
+                max_nu=max_anomaly,
+                num_values=values,
+            ),
+        )
+        # We call .sample() at the end to retrieve the coordinates for the same epochs
+        return ephem.sample()
 
     def plot(self, label=None, use_3d=False, interactive=False):
         """Plots the orbit.
