@@ -15,7 +15,7 @@ from ..angles import (
     nu_to_E,
     nu_to_F,
 )
-from poliastro.core.elements import coe2rv, rv2coe
+from ..elements import coe2rv, rv2coe
 
 
 @jit
