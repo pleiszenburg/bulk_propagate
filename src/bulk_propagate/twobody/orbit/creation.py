@@ -3,7 +3,8 @@ from astropy import units as u
 
 from poliastro.constants import J2000
 from poliastro.frames import Planes
-from poliastro.twobody.states import (
+
+from ..states import (
     # ClassicalState,
     # ModifiedEquinoctialState,
     RVState,

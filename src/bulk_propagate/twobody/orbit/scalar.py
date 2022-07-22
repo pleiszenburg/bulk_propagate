@@ -7,8 +7,9 @@ from poliastro.frames.util import get_frame
 from poliastro.twobody.elements import eccentricity_vector, energy
 from poliastro.twobody.orbit.creation import OrbitCreationMixin
 from poliastro.twobody.propagation import FarnocchiaPropagator, PropagatorKind
-from poliastro.twobody.states import BaseState
 from poliastro.util import norm
+
+from ..states import BaseState
 
 ORBIT_FORMAT = "{r_p:.0f} x {r_a:.0f} x {inc:.1f} ({frame}) orbit around {body} at epoch {epoch} ({scale})"
 # String representation for orbits around bodies without predefined
