@@ -2,3 +2,5 @@ __*__/
 *.pyc
 .ipynb_checkpoints/
 .vscode/
+*.jpg
+*.png
